@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D Point Plotter</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f8f9fa;
+      color: #222;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 30px auto;
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+      padding: 24px;
+    }
+    .sliders {
+      display: flex;
+      gap: 24px;
+      margin-bottom: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .slider-group {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    label {
+      font-size: 1em;
+      margin-bottom: 6px;
+    }
+    input[type=range] {
+      width: 140px;
+    }
+    #plot {
+      width: 100%;
+      height: 720px;
+      background: #f3f3f3;
+      border-radius: 8px;
+      margin-bottom: 10px;
+    }
+    .coords {
+      text-align: center;
+      font-size: 1.1em;
+      margin-bottom: 6px;
+    }
+    .toolbar {
+      display: flex;
+      justify-content: flex-end;
+      margin: 6px 0 8px 0;
+      gap: 8px;
+    }
+  </style>
+  <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <div class="sliders">
+      <div class="slider-group">
+        <label for="x">x</label>
+        <input type="range" id="x" min="-10" max="10" value="0" />
+        <span id="x-val">0</span>
+      </div>
+      <div class="slider-group">
+        <label for="y">y</label>
+        <input type="range" id="y" min="-10" max="10" value="0" />
+        <span id="y-val">0</span>
+      </div>
+      <div class="slider-group">
+        <label for="z">z</label>
+        <input type="range" id="z" min="-10" max="10" value="0" />
+        <span id="z-val">0</span>
+      </div>
+    </div>
+
+    <div class="coords" id="coords-label">Point: (0, 0, 0)</div>
+
+    <div class="toolbar">
+      <button id="home-view" title="Reset camera to home view">Home view</button>
+    </div>
+
+    <div id="plot"></div>
+
+    <hr style="margin:20px 0;border:none;border-top:1px solid #eee;" />
+    <div id="practice" class="practice">
+      <h3 style="margin-top:0">Practice</h3>
+      <ol style="margin: 6px 0 0 20px; font-size: 1.05em;">
+        <li>Plot the point (3, -2, 5).</li>
+        <li>Plot the point (-7, 4, 0).</li>
+        <li>Plot the point (0, -6, -3).</li>
+        <li>Plot the point (9, 0, 2).</li>
+        <li>Plot the point (-1, -1, -1).</li>
+        <li>Plot the point (10, -10, 10).</li>
+        <li>Plot the point (2, 7, -4).</li>
+      </ol>
+    </div>
+  </div>
+
+  <script>
+    // Sliders and UI
+    const xSlider = document.getElementById('x');
+    const ySlider = document.getElementById('y');
+    const zSlider = document.getElementById('z');
+    const xVal = document.getElementById('x-val');
+    const yVal = document.getElementById('y-val');
+    const zVal = document.getElementById('z-val');
+    const coordsLabel = document.getElementById('coords-label');
+    const plotEl = document.getElementById('plot');
+
+  // Conceptual axes extent and visible view range
+  const AXIS_RANGE = 10; // axes and sliders span ±10
+  const VIEW_RANGE = 9;  // zoomed-in visible range (orthographic)
+
+    function getValues() {
+      return [
+        parseInt(xSlider.value),
+        parseInt(ySlider.value),
+        parseInt(zSlider.value)
+      ];
+    }
+
+    function updateLabels() {
+      xVal.textContent = xSlider.value;
+      yVal.textContent = ySlider.value;
+      zVal.textContent = zSlider.value;
+      coordsLabel.textContent = `Point: (${xSlider.value}, ${ySlider.value}, ${zSlider.value})`;
+    }
+
+    // Define initial camera (home view)
+    const initialCamera = {
+      // Orthographic view keeps label size constant with depth; bring eye closer for a tighter view
+      eye: { x: 0.6, y: 0.8, z: 0.6 },
+      center: { x: 0, y: 0, z: 0 },
+      up: { x: 0, y: 0, z: 1 },
+      projection: { type: 'orthographic' }
+    };
+
+    // Build static plot once; then restyle dynamic traces
+    let pathIndex = null;
+    let pointIndex = null;
+
+    function initPlot() {
+      const axisLength = AXIS_RANGE;
+      const xAxis = { x: [-axisLength, axisLength], y: [0, 0], z: [0, 0], mode: 'lines', type: 'scatter3d', line: { color: 'red', width: 8 }, name: 'x-axis', showlegend: false };
+      const yAxis = { x: [0, 0], y: [-axisLength, axisLength], z: [0, 0], mode: 'lines', type: 'scatter3d', line: { color: 'green', width: 8 }, name: 'y-axis', showlegend: false };
+      const zAxis = { x: [0, 0], y: [0, 0], z: [-axisLength, axisLength], mode: 'lines', type: 'scatter3d', line: { color: 'blue', width: 8 }, name: 'z-axis', showlegend: false };
+
+  const gridSize = VIEW_RANGE;
+      const gridLines = [];
+      for (let i = -gridSize; i <= gridSize; i++) {
+        gridLines.push({ x: [-gridSize, gridSize], y: [i, i], z: [0, 0], mode: 'lines', type: 'scatter3d', line: { color: '#ddd', width: 2 }, hoverinfo: 'skip', showlegend: false });
+        gridLines.push({ x: [i, i], y: [-gridSize, gridSize], z: [0, 0], mode: 'lines', type: 'scatter3d', line: { color: '#ddd', width: 2 }, hoverinfo: 'skip', showlegend: false });
+      }
+
+      const [x, y, z] = getValues();
+      const pathX = [0, x, x, x];
+      const pathY = [0, 0, y, y];
+      const pathZ = [0, 0, 0, z];
+      const pathTrace = { x: pathX, y: pathY, z: pathZ, mode: 'lines', type: 'scatter3d', line: { color: '#888', width: 4 }, name: 'Path' };
+  const pointTrace = { x: [x], y: [y], z: [z], mode: 'markers', type: 'scatter3d', marker: { size: 12, color: '#007bff' }, name: 'Point' };
+
+      const scene = {
+        xaxis: { range: [-VIEW_RANGE, VIEW_RANGE], title: '', showspikes: false, showgrid: false, showbackground: false, showline: false, zeroline: false, ticks: '', showticklabels: false },
+        yaxis: { range: [-VIEW_RANGE, VIEW_RANGE], title: '', showspikes: false, showgrid: false, showbackground: false, showline: false, zeroline: false, ticks: '', showticklabels: false },
+        zaxis: { range: [-VIEW_RANGE, VIEW_RANGE], title: '', showspikes: false, showgrid: false, showbackground: false, showline: false, zeroline: false, ticks: '', showticklabels: false },
+        bgcolor: '#f3f3f3', aspectmode: 'cube', domain: { x: [0, 1], y: [0, 1] }, uirevision: 'keep-view', camera: initialCamera,
+      };
+
+      const layout = { autosize: true, margin: { l: 0, r: 0, b: 0, t: 0, pad: 0 }, scene, showlegend: false, paper_bgcolor: '#f3f3f3', uirevision: 'keep-view' };
+
+      const data = [xAxis, yAxis, zAxis, ...gridLines, pathTrace, pointTrace];
+  Plotly.newPlot(plotEl, data, layout, { displayModeBar: false, responsive: true });
+  // Add an annotation label that keeps a constant screen size
+  setPointLabel(x, y, z);
+
+      pathIndex = 3 + gridLines.length; // after axes (3) and all grid lines
+      pointIndex = pathIndex + 1;
+    }
+
+    function setPointLabel(x, y, z) {
+      const ann = [{
+        x, y, z,
+        text: `(${x}, ${y}, ${z})`,
+        showarrow: false,
+        xanchor: 'left',
+        yanchor: 'bottom',
+        font: { size: 20, color: '#222' },
+      }];
+      Plotly.relayout(plotEl, { 'scene.annotations': ann });
+    }
+
+    function updateDynamicTraces() {
+      const [x, y, z] = getValues();
+      const pathX = [0, x, x, x];
+      const pathY = [0, 0, y, y];
+      const pathZ = [0, 0, 0, z];
+      Plotly.restyle(plotEl, { x: [pathX], y: [pathY], z: [pathZ] }, [pathIndex]);
+      Plotly.restyle(plotEl, { x: [[x]], y: [[y]], z: [[z]] }, [pointIndex]);
+      setPointLabel(x, y, z);
+    }
+
+    function update() {
+      updateLabels();
+      updateDynamicTraces();
+    }
+
+    xSlider.addEventListener('input', update);
+    ySlider.addEventListener('input', update);
+    zSlider.addEventListener('input', update);
+
+  // Initial plot
+  initPlot();
+  updateLabels();
+
+    // Home view button resets camera orientation
+    const homeBtn = document.getElementById('home-view');
+    homeBtn.addEventListener('click', () => {
+      Plotly.relayout(plotEl, { 'scene.camera': initialCamera });
+    });
+
+    // Keep plot responsive on window resize
+    window.addEventListener('resize', () => {
+      Plotly.Plots.resize(plotEl);
+    });
+  </script>
+</body>
+</html>
